@@ -3,21 +3,19 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>YCPS (Hoi Wang Road) Dismissal System</title>
-    
+    <title>油蔴地天主教小學（海泓道）- 放學即時狀態</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-    
     <script src="https://unpkg.com/lucide@latest"></script>
-    
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;700;900&display=swap');
-        body { font-family: 'Noto Sans TC', sans-serif; margin: 0; overflow: hidden; background-color: #f9fafb; }
+        body { font-family: 'Noto Sans TC', sans-serif; margin: 0; overflow: hidden; background-color: #f3f4f6; }
         .custom-scrollbar::-webkit-scrollbar { width: 6px; }
         .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+        .animate-marquee { animation: marquee 30s linear infinite; }
+        @keyframes marquee { 0% { transform: translateX(0); } 100% { transform: translateX(-50%); } }
     </style>
 </head>
 <body>
@@ -38,8 +36,7 @@
         import { getFirestore, doc, onSnapshot, setDoc, collection } from "firebase/firestore";
         import { getAuth, signInAnonymously, onAuthStateChanged } from "firebase/auth";
 
-        // --- ⚠️ PASTE YOUR FIREBASE CONFIG HERE ⚠️ ---
-       const firebaseConfig = {
+        const firebaseConfig = {
             apiKey: "AIzaSyADzOtEqHLfuoq5obExFdx2bqIEhRZM44I",
             authDomain: "school-dismissal-608be.firebaseapp.com",
             projectId: "school-dismissal-608be",
@@ -52,161 +49,121 @@
         const app = initializeApp(firebaseConfig);
         const auth = getAuth(app);
         const db = getFirestore(app);
-        const appId = 'ycps-dismissal-v1';
-
-        // Expose to window for the React script to access
-        window.fb = { auth, db, appId, doc, onSnapshot, setDoc, collection };
+        window.fb = { auth, db, doc, onSnapshot, setDoc, collection };
     </script>
 
     <script type="text/babel">
-        const { useState, useEffect, useMemo } = React;
-        const { 
-            Clock, Shield, Users, CheckCircle, AlertCircle, School, 
-            Settings, Sparkles, Megaphone, Loader2, X, Share2, Check 
-        } = lucide;
+        const { useState, useEffect } = React;
 
-        const GRADES = [1, 2, 3, 4, 5, 6];
-        const SECTIONS = ['A', 'B', 'C', 'D', 'E'];
-        const STATUS_LEVELS = ['IN_CLASS', 'PREPARING', 'DISMISSED'];
-
+        const STATUS_ORDER = ['IN_CLASS', 'PREPARING', 'DISMISSED'];
         const STATUS_CONFIG = {
-            IN_CLASS: { label: '上課中', bgColor: 'bg-white', textColor: 'text-gray-400', borderColor: 'border-gray-200', icon: 'School' },
-            PREPARING: { label: '準備中', bgColor: 'bg-amber-100', textColor: 'text-amber-700', borderColor: 'border-amber-400', icon: 'AlertCircle', animation: 'animate-pulse' },
-            DISMISSED: { label: '已放學', bgColor: 'bg-green-100', textColor: 'text-green-700', borderColor: 'border-green-500', icon: 'CheckCircle' }
+            IN_CLASS: { label: '上課中', bgColor: 'bg-white', textColor: 'text-gray-300', borderColor: 'border-gray-100', icon: 'school' },
+            PREPARING: { label: '準備中', bgColor: 'bg-amber-400', textColor: 'text-white', borderColor: 'border-amber-500', icon: 'alert-circle', animation: 'animate-pulse' },
+            DISMISSED: { label: '已放學', bgColor: 'bg-emerald-500', textColor: 'text-white', borderColor: 'border-emerald-600', icon: 'check-circle' }
         };
 
-        const INITIAL_CLASSES = [];
-        GRADES.forEach(g => SECTIONS.forEach(s => INITIAL_CLASSES.push({ id: `${g}${s}`, status: 'IN_CLASS' })));
+        const CLASSES_LIST = [];
+        for (let g = 1; g <= 6; g++) {
+            ['A', 'B', 'C', 'D', 'E'].forEach(s => CLASSES_LIST.push({ id: `${g}${s}`, status: 'IN_CLASS' }));
+        }
 
         function App() {
             const [user, setUser] = useState(null);
             const [viewMode, setViewMode] = useState('PARENT'); 
-            const [classes, setClasses] = useState(INITIAL_CLASSES);
-            const [broadcastMessage, setBroadcastMessage] = useState('');
+            const [classes, setClasses] = useState(CLASSES_LIST);
+            const [broadcast, setBroadcast] = useState('歡迎家長，請查看即時進度。');
             const [currentTime, setCurrentTime] = useState(new Date());
-            const [isGenerating, setIsGenerating] = useState(false);
-            const [broadcastInput, setBroadcastInput] = useState('');
-            const [toastMsg, setToastMsg] = useState('');
 
             useEffect(() => {
                 const unsubAuth = window.fb.auth.onAuthStateChanged(u => {
-                    if (!u) signInAnonymously(window.fb.auth);
+                    if (!u) window.fb.auth.signInAnonymously;
                     setUser(u);
                 });
-                const timer = setInterval(() => setCurrentTime(new Date()), 1000);
+                const timer = setInterval(() => {
+                    setCurrentTime(new Date());
+                    if (window.lucide) window.lucide.createIcons();
+                }, 1000);
                 return () => { unsubAuth(); clearInterval(timer); };
             }, []);
 
             useEffect(() => {
                 if (!user) return;
-                const docRef = window.fb.doc(window.fb.db, 'school_state', 'current_v1');
+                const docRef = window.fb.doc(window.fb.db, 'data', 'current_state');
                 return window.fb.onSnapshot(docRef, (snap) => {
                     if (snap.exists()) {
                         const data = snap.data();
                         if (data.classes) setClasses(data.classes);
-                        if (data.broadcastMessage !== undefined) setBroadcastMessage(data.broadcastMessage);
+                        if (data.broadcast) setBroadcast(data.broadcast);
                     } else {
-                        window.fb.setDoc(docRef, { classes: INITIAL_CLASSES, broadcastMessage: '' });
+                        window.fb.setDoc(docRef, { classes: CLASSES_LIST, broadcast: '歡迎使用油天（海泓道）放學系統' });
                     }
                 });
             }, [user]);
 
-            const updateCloud = async (newClasses, newMsg) => {
-                const docRef = window.fb.doc(window.fb.db, 'school_state', 'current_v1');
-                await window.fb.setDoc(docRef, { 
-                    classes: newClasses, 
-                    broadcastMessage: newMsg !== undefined ? newMsg : broadcastMessage 
-                }, { merge: true });
-            };
+            useEffect(() => { if (window.lucide) window.lucide.createIcons(); }, [classes, viewMode]);
 
-            const handleClassClick = (id) => {
+            const updateStatus = async (id) => {
                 if (viewMode !== 'ADMIN') return;
                 const newClasses = classes.map(c => {
                     if (c.id === id) {
-                        const next = STATUS_LEVELS[(STATUS_LEVELS.indexOf(c.status) + 1) % STATUS_LEVELS.length];
+                        const next = STATUS_ORDER[(STATUS_ORDER.indexOf(c.status) + 1) % STATUS_ORDER.length];
                         return { ...c, status: next };
                     }
                     return c;
                 });
                 setClasses(newClasses);
-                updateCloud(newClasses, undefined);
-            };
-
-            const generateBroadcast = async () => {
-                if (!broadcastInput.trim()) return;
-                setIsGenerating(true);
-                // Note: In production, call Gemini via a backend proxy to protect API Key
-                const apiKey = "YOUR_GEMINI_API_KEY"; 
-                try {
-                    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`, {
-                        method: 'POST',
-                        body: JSON.stringify({ contents: [{ parts: [{ text: `你是一位學校管理員，請用30字內專業地轉換關鍵字為放學廣播：${broadcastInput}` }] }] })
-                    });
-                    const data = await res.json();
-                    const text = data.candidates[0].content.parts[0].text;
-                    setBroadcastMessage(text);
-                    updateCloud(classes, text);
-                    setBroadcastInput('');
-                } catch (err) { setToastMsg('API Error'); } finally { setIsGenerating(false); }
+                await window.fb.setDoc(window.fb.doc(window.fb.db, 'data', 'current_state'), { classes: newClasses }, { merge: true });
             };
 
             return (
-                <div className="h-screen flex flex-col bg-gray-50 overflow-hidden">
-                    <header className="bg-white border-b px-6 py-3 flex items-center justify-between shadow-sm">
+                <div className="h-screen flex flex-col bg-gray-100 overflow-hidden">
+                    <header className="bg-white border-b px-6 py-4 flex items-center justify-between shadow-sm">
                         <div className="flex items-center gap-4">
-                            <div className="w-12 h-12 bg-blue-800 rounded-full flex items-center justify-center text-white font-bold">YCPS</div>
+                            <div className="bg-blue-800 text-white p-2 rounded-xl">
+                                <i data-lucide="school" size="32"></i>
+                            </div>
                             <div>
-                                <h1 className="text-xl font-black text-blue-900 leading-none">油蔴地天主教小學（海泓道）</h1>
-                                <p className="text-xs font-bold text-gray-500 mt-1 uppercase tracking-widest">Real-time Dismissal Board</p>
+                                <h1 className="text-xl md:text-2xl font-black text-blue-900 leading-none">油蔴地天主教小學（海泓道）</h1>
+                                <p className="text-[10px] font-bold text-gray-400 mt-1 uppercase tracking-tighter">Real-time Student Dismissal Status</p>
                             </div>
                         </div>
                         <div className="flex items-center gap-4">
-                            <div className="text-right hidden md:block">
-                                <div className="text-2xl font-black text-blue-900 tabular-nums">{currentTime.toLocaleTimeString()}</div>
+                            <div className="text-right hidden sm:block mr-4">
+                                <div className="text-2xl font-black text-blue-900 font-mono">{currentTime.toLocaleTimeString()}</div>
                             </div>
-                            <div className="bg-gray-100 p-1 rounded-xl flex">
-                                <button onClick={() => setViewMode('PARENT')} className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${viewMode === 'PARENT' ? 'bg-white shadow-sm text-blue-600' : 'text-gray-500'}`}>家長視角</button>
-                                <button onClick={() => setViewMode('ADMIN')} className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${viewMode === 'ADMIN' ? 'bg-blue-600 text-white shadow-sm' : 'text-gray-500'}`}>管理員</button>
+                            <div className="bg-gray-200 p-1 rounded-xl flex shadow-inner">
+                                <button onClick={() => setViewMode('PARENT')} className={`px-3 py-2 rounded-lg text-xs font-bold transition-all ${viewMode === 'PARENT' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500'}`}>家長觀看</button>
+                                <button onClick={() => setViewMode('ADMIN')} className={`px-3 py-2 rounded-lg text-xs font-bold transition-all ${viewMode === 'ADMIN' ? 'bg-blue-700 text-white shadow-sm' : 'text-gray-500'}`}>管理員</button>
                             </div>
                         </div>
                     </header>
 
-                    <main className="flex-1 p-4 flex flex-col gap-4 overflow-hidden">
-                        {broadcastMessage && (
-                            <div className="bg-yellow-100 border-l-4 border-yellow-500 p-4 rounded-r-lg flex justify-between items-center animate-pulse">
-                                <div className="flex items-center gap-3 font-bold text-yellow-800">
-                                    <Megaphone size={24} /> <span>{broadcastMessage}</span>
-                                </div>
-                                {viewMode === 'ADMIN' && <button onClick={() => updateCloud(classes, '')}><X /></button>}
-                            </div>
-                        )}
-
-                        {viewMode === 'ADMIN' && (
-                            <div className="bg-white p-3 border rounded-xl flex gap-4 items-center shadow-sm">
-                                <Sparkles className="text-blue-600" />
-                                <input value={broadcastInput} onChange={e => setBroadcastInput(e.target.value)} placeholder="輸入關鍵字讓 AI 生成廣播..." className="flex-1 outline-none text-sm font-medium" />
-                                <button onClick={generateBroadcast} disabled={isGenerating} className="bg-blue-600 text-white px-4 py-2 rounded-lg font-bold text-sm">生成廣播</button>
-                                <button onClick={() => updateCloud(INITIAL_CLASSES, '')} className="text-red-500 font-bold text-sm border-l pl-4">全部重置</button>
-                            </div>
-                        )}
-
-                        <div className="flex-1 grid grid-cols-5 gap-3 overflow-y-auto custom-scrollbar pr-2">
-                            {classes.map(cls => {
-                                const cfg = STATUS_CONFIG[cls.status];
-                                const Icon = lucide[cfg.icon];
-                                return (
-                                    <div key={cls.id} onClick={() => handleClassClick(cls.id)} className={`relative p-6 rounded-2xl border-2 transition-all flex flex-col items-center justify-center gap-2 ${cfg.bgColor} ${cfg.borderColor} ${viewMode === 'ADMIN' ? 'cursor-pointer active:scale-95' : ''}`}>
-                                        <div className="text-4xl font-black text-slate-800">{cls.id}</div>
-                                        <div className={`flex items-center gap-1 font-bold text-xs uppercase ${cfg.textColor}`}>
-                                            <Icon size={14} className={cfg.animation || ''} /> {cfg.label}
-                                        </div>
+                    <main className="flex-1 p-4 grid grid-cols-4 sm:grid-cols-5 md:grid-cols-6 gap-2 md:gap-3 overflow-y-auto custom-scrollbar">
+                        {classes.map(cls => {
+                            const cfg = STATUS_CONFIG[cls.status];
+                            return (
+                                <button key={cls.id} onClick={() => updateStatus(cls.id)} 
+                                    className={`relative rounded-xl border-2 flex flex-col items-center justify-center p-3 md:p-5 transition-all duration-300 ${cfg.bgColor} ${cfg.borderColor} ${viewMode === 'ADMIN' ? 'active:scale-95' : 'cursor-default'}`}>
+                                    <span className={`text-2xl md:text-4xl font-black mb-1 ${cls.status === 'IN_CLASS' ? 'text-gray-200' : 'text-white'}`}>{cls.id}</span>
+                                    <div className={`flex items-center gap-1 font-bold text-[9px] md:text-[11px] uppercase ${cfg.textColor}`}>
+                                        <i data-lucide={cfg.icon} className={`w-3 h-3 md:w-4 md:h-4 ${cfg.animation || ''}`}></i> 
+                                        {cfg.label}
                                     </div>
-                                );
-                            })}
-                        </div>
+                                </button>
+                            );
+                        })}
                     </main>
 
-                    {toastMsg && <div className="fixed bottom-10 left-1/2 -translate-x-1/2 bg-black/80 text-white px-6 py-3 rounded-full font-bold">{toastMsg}</div>}
+                    <footer className="h-12 bg-blue-900 text-white flex items-center overflow-hidden">
+                        <div className="bg-amber-500 px-4 h-full flex items-center font-black italic z-10 shadow-lg text-sm">重要公告</div>
+                        <div className="flex-1 whitespace-nowrap overflow-hidden">
+                            <div className="animate-marquee inline-block text-lg font-bold">
+                                <span className="mx-10">{broadcast}</span>
+                                <span className="mx-10">家長請保持通道暢通，謝謝合作。</span>
+                                <span className="mx-10">{broadcast}</span>
+                            </div>
+                        </div>
+                    </footer>
                 </div>
             );
         }
